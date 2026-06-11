@@ -29,7 +29,8 @@ class MainActivity : ComponentActivity() {
             applicationContext,
             AppDatabase::class.java,
             "economic_vault.db"
-        ).build()
+        ).fallbackToDestructiveMigration()
+         .build()
 
         repository = EconomicRepository(db)
         viewModel = EconomicViewModel(repository)

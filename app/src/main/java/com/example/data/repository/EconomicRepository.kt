@@ -48,6 +48,23 @@ class EconomicRepository(private val db: AppDatabase) {
 
     val allSeries: Flow<List<SeriesEntity>> = seriesDao.getAllSeries()
 
+    val recentLogs: Flow<List<SyncLogEntity>> = db.syncLogDao().getRecentLogs()
+
+    suspend fun logSync(sourceName: String, status: String, message: String, details: String = "") {
+        db.syncLogDao().insertLog(
+            SyncLogEntity(
+                sourceName = sourceName,
+                status = status,
+                message = message,
+                details = details
+            )
+        )
+    }
+
+    suspend fun clearLogs() {
+        db.syncLogDao().clearLogs()
+    }
+
     fun getDataPointsForSeries(seriesId: String): Flow<List<DataPointEntity>> =
         dataPointDao.getDataPointsForSeries(seriesId)
 
@@ -114,18 +131,62 @@ class EconomicRepository(private val db: AppDatabase) {
                             }
                             // Insert into database
                             dataPointDao.insertDataPoints(entityPoints)
+                            logSync(
+                                sourceName = "BLS API - $seriesId",
+                                status = "SUCCESS",
+                                message = "Synchronized ${entityPoints.size} data points successfully."
+                            )
                             return@withContext Result.success(Unit)
                         } else {
-                            return@withContext Result.failure(Exception("No data points returned from BLS for series ID: $seriesId"))
+                            val emptyErr = "No data points returned from BLS for series ID: $seriesId"
+                            logSync(
+                                sourceName = "BLS API - $seriesId",
+                                status = "FAILURE_DOWNTIME",
+                                message = emptyErr
+                            )
+                            return@withContext Result.failure(Exception(emptyErr))
                         }
                     } else {
-                        return@withContext Result.failure(Exception("Series not found in BLS API response"))
+                        val missingErr = "Series not found in BLS API response"
+                        logSync(
+                            sourceName = "BLS API - $seriesId",
+                            status = "FAILURE_DOWNTIME",
+                            message = missingErr
+                        )
+                        return@withContext Result.failure(Exception(missingErr))
                     }
                 } else {
-                    val message = response.message?.joinToString(", ") ?: "BLS API Error"
-                    return@withContext Result.failure(Exception("BLS response failed. Status: ${response.status}. Msg: $message"))
+                    val rawMessage = response.message?.joinToString(", ") ?: "BLS API Error"
+                    
+                    // Determine rate limit vs key vs generic fail
+                    val status = when {
+                        rawMessage.contains("threshold", ignoreCase = true) || 
+                        rawMessage.contains("rate limit", ignoreCase = true) ||
+                        rawMessage.contains("limit exceeded", ignoreCase = true) -> "FAILURE_RATE_LIMIT"
+                        
+                        rawMessage.contains("key", ignoreCase = true) ||
+                        rawMessage.contains("register", ignoreCase = true) ||
+                        rawMessage.contains("invalid key", ignoreCase = true) -> "FAILURE_KEYS"
+                        
+                        else -> "FAILURE_DOWNTIME"
+                    }
+                    
+                    val errMsg = "BLS response failed. Status: ${response.status}. Msg: $rawMessage"
+                    logSync(
+                        sourceName = "BLS API - $seriesId",
+                        status = status,
+                        message = errMsg,
+                        details = rawMessage
+                    )
+                    return@withContext Result.failure(Exception(errMsg))
                 }
             } catch (e: Exception) {
+                val connErr = e.localizedMessage ?: "Unknown hardware connection issue or timeout."
+                logSync(
+                    sourceName = "BLS API - $seriesId",
+                    status = "FAILURE_CONN",
+                    message = "Network connectivity timeout or downtime: $connErr"
+                )
                 return@withContext Result.failure(e)
             }
         }

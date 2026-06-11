@@ -78,6 +78,20 @@ class EconomicViewModel(private val repository: EconomicRepository) : ViewModel(
     private val _refreshState = MutableStateFlow<RefreshUiState>(RefreshUiState.Idle)
     val refreshState: StateFlow<RefreshUiState> = _refreshState.asStateFlow()
 
+    // Live Sync Logs Flow for background transparency
+    val recentLogs: StateFlow<List<com.example.data.local.SyncLogEntity>> = repository.recentLogs
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    fun clearAllLogs() {
+        viewModelScope.launch {
+            repository.clearLogs()
+        }
+    }
+
     // Live API Keys (from Settings)
     val blsApiKey: StateFlow<String> = repository.observeSetting("bls_api_key")
         .map { it?.value ?: "" }

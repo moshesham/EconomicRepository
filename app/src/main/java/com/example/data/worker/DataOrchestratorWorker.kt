@@ -7,6 +7,8 @@ import androidx.work.WorkerParameters
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.room.Room
+import kotlinx.coroutines.flow.first
 import java.util.concurrent.TimeUnit
 import com.example.data.repository.EconomicRepository
 import com.example.data.local.AppDatabase
@@ -19,24 +21,49 @@ class DataOrchestratorWorker(
     override suspend fun doWork(): Result {
         Log.d("DataOrchestrator", "Running background update for economic data registry...")
         
-        // In a real app, you would inject the repository here, but for this example:
-        // By iterating through the data registry, we ensure our BLS, FRED, Yahoo Finance 
-        // and other sources are updated per their documented SLA.
-        
-        // Let's pretend to iterate through sources:
-        // "Yahoo Finance" -> Daily
-        // "FRED" -> Varies
-        // "BLS" -> Monthly
-        // "CoinGecko" -> Real-time (not suited for background tasks usually, but we could poll)
-        
+        val db = Room.databaseBuilder(
+            applicationContext,
+            AppDatabase::class.java,
+            "economic_vault.db"
+        ).fallbackToDestructiveMigration()
+         .build()
+
+        val repository = EconomicRepository(db)
+
         try {
-            // Update logic would go here. For example:
-            // repository.syncAllSources()
-            Log.d("DataOrchestrator", "Update successful.")
+            val seriesList = db.seriesDao().getAllSeries().first()
+            if (seriesList.isEmpty()) {
+                Log.d("DataOrchestrator", "No series registered yet. Seeding initial data...")
+                repository.seedInitialData()
+            }
+            
+            val freshSeriesList = db.seriesDao().getAllSeries().first()
+            var successCount = 0
+            var failCount = 0
+
+            freshSeriesList.forEach { series ->
+                // Refresh data from BLS API
+                val res = repository.refreshBLSData(series.id)
+                if (res.isSuccess) {
+                    successCount++
+                } else {
+                    failCount++
+                }
+            }
+
+            repository.logSync(
+                sourceName = "Orchestrator",
+                status = if (failCount == 0) "SUCCESS" else "FAILURE_DOWNTIME",
+                message = "Automated background sync completed. $successCount indicator(s) updated successfully. $failCount failure(s)."
+            )
+
+            Log.d("DataOrchestrator", "Update successful. Status recorded in database SyncLog table.")
             return Result.success()
         } catch (e: Exception) {
-            Log.e("DataOrchestrator", "Error updating data registry", e)
+            Log.e("DataOrchestrator", "Error in DataOrchestrator job execution", e)
             return Result.retry()
+        } finally {
+            db.close()
         }
     }
 

@@ -158,7 +158,7 @@ fun DashboardScreen(
                     onDismiss = { currentTab = DashboardTab.Home }
                 )
             } else if (currentTab == DashboardTab.Sources) {
-                DataSourcesView()
+                DataSourcesView(viewModel = viewModel)
             } else {
                 if (isWideScreen) {
                     // Canonical List-Detail Split Grid Layout for Tablets

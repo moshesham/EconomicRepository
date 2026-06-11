@@ -78,13 +78,36 @@ interface SettingsDao {
     suspend fun saveSetting(setting: SettingsEntity)
 }
 
+@Entity(tableName = "sync_logs")
+data class SyncLogEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val timestamp: Long = System.currentTimeMillis(),
+    val sourceName: String,
+    val status: String, // SUCCESS, FAILURE_RATE_LIMIT, FAILURE_DOWNTIME, FAILURE_KEYS, FAILURE_CONN
+    val message: String,
+    val details: String = ""
+)
+
+@Dao
+interface SyncLogDao {
+    @Query("SELECT * FROM sync_logs ORDER BY timestamp DESC LIMIT 50")
+    fun getRecentLogs(): Flow<List<SyncLogEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLog(log: SyncLogEntity)
+
+    @Query("DELETE FROM sync_logs")
+    suspend fun clearLogs()
+}
+
 @Database(
-    entities = [SeriesEntity::class, DataPointEntity::class, SettingsEntity::class],
-    version = 1,
+    entities = [SeriesEntity::class, DataPointEntity::class, SettingsEntity::class, SyncLogEntity::class],
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun seriesDao(): SeriesDao
     abstract fun dataPointDao(): DataPointDao
     abstract fun settingsDao(): SettingsDao
+    abstract fun syncLogDao(): SyncLogDao
 }
