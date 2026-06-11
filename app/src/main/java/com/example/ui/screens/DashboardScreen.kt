@@ -108,6 +108,8 @@ fun DashboardScreen(
                     }
                 },
                 actions = {
+                    HeaderStatusIndicator(viewModel = viewModel)
+                    Spacer(modifier = Modifier.width(4.dp))
                     IconButton(
                         onClick = { currentTab = if (currentTab == DashboardTab.Settings) DashboardTab.Home else DashboardTab.Settings },
                         modifier = Modifier.testTag("settings_toggle_button")
@@ -213,6 +215,7 @@ fun DashboardScreen(
                                     analysisState = analysisState,
                                     refreshState = refreshState,
                                     onRefresh = { viewModel.refreshSelectedSeries() },
+                                    onPostgresSync = { viewModel.syncSelectedSeriesFromPostgres() },
                                     onAnalyze = { viewModel.analyzeCurrentSeries() },
                                     onAddForecast = { yr, mo, valStr -> viewModel.addForecastDataPoint(yr, mo, valStr) },
                                     onClearForecasts = { viewModel.clearCustomDataPoints() }
@@ -259,6 +262,7 @@ fun DashboardScreen(
                                             analysisState = analysisState,
                                             refreshState = refreshState,
                                             onRefresh = { viewModel.refreshSelectedSeries() },
+                                            onPostgresSync = { viewModel.syncSelectedSeriesFromPostgres() },
                                             onAnalyze = { viewModel.analyzeCurrentSeries() },
                                             onAddForecast = { yr, mo, valStr -> viewModel.addForecastDataPoint(yr, mo, valStr) },
                                             onClearForecasts = { viewModel.clearCustomDataPoints() }
@@ -936,6 +940,7 @@ fun DetailPanel(
     analysisState: AnalysisUiState,
     refreshState: RefreshUiState,
     onRefresh: () -> Unit,
+    onPostgresSync: () -> Unit,
     onAnalyze: () -> Unit,
     onAddForecast: (year: String, month: String, valStr: String) -> Unit,
     onClearForecasts: () -> Unit
@@ -965,23 +970,48 @@ fun DetailPanel(
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
                 )
-                // Refresh live data tracker button
-                FilledTonalButton(
-                    onClick = onRefresh,
-                    enabled = refreshState !is RefreshUiState.Loading,
-                    modifier = Modifier
-                        .height(34.dp)
-                        .testTag("refresh_button"),
-                    contentPadding = PaddingValues(horizontal = 10.dp)
+                
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (refreshState is RefreshUiState.Loading) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Refresh Live Data", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    // Sync from Postgres DB Server
+                    FilledTonalButton(
+                        onClick = onPostgresSync,
+                        enabled = refreshState !is RefreshUiState.Loading,
+                        modifier = Modifier
+                            .height(34.dp)
+                            .testTag("postgres_sync_button"),
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        if (refreshState is RefreshUiState.Loading) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Postgres Sync", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Refresh live data tracker button
+                    FilledTonalButton(
+                        onClick = onRefresh,
+                        enabled = refreshState !is RefreshUiState.Loading,
+                        modifier = Modifier
+                            .height(34.dp)
+                            .testTag("refresh_button"),
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        if (refreshState is RefreshUiState.Loading) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("BLS API", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -1319,13 +1349,31 @@ fun SettingsPanelContent(
     val blsKeyInDb by viewModel.blsApiKey.collectAsStateWithLifecycle()
     val geminiKeyInDb by viewModel.geminiApiKey.collectAsStateWithLifecycle()
 
+    val pgHost by viewModel.pgHost.collectAsStateWithLifecycle()
+    val pgPort by viewModel.pgPort.collectAsStateWithLifecycle()
+    val pgDatabase by viewModel.pgDatabase.collectAsStateWithLifecycle()
+    val pgUsername by viewModel.pgUsername.collectAsStateWithLifecycle()
+    val pgGatewayUrl by viewModel.pgGatewayUrl.collectAsStateWithLifecycle()
+    val pgTestState by viewModel.pgTestState.collectAsStateWithLifecycle()
+
     var tempBlsKey by remember { mutableStateOf("") }
     var tempGeminiKey by remember { mutableStateOf("") }
 
+    var tempPgHost by remember { mutableStateOf("") }
+    var tempPgPort by remember { mutableStateOf("") }
+    var tempPgDatabase by remember { mutableStateOf("") }
+    var tempPgUsername by remember { mutableStateOf("") }
+    var tempPgGatewayUrl by remember { mutableStateOf("") }
+
     // Preload keys when state is set
-    LaunchedEffect(blsKeyInDb, geminiKeyInDb) {
+    LaunchedEffect(blsKeyInDb, geminiKeyInDb, pgHost, pgPort, pgDatabase, pgUsername, pgGatewayUrl) {
         tempBlsKey = blsKeyInDb
         tempGeminiKey = geminiKeyInDb
+        tempPgHost = pgHost
+        tempPgPort = pgPort
+        tempPgDatabase = pgDatabase
+        tempPgUsername = pgUsername
+        tempPgGatewayUrl = pgGatewayUrl
     }
 
     Column(
@@ -1336,19 +1384,122 @@ fun SettingsPanelContent(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
-            text = "API Configuration Control",
+            text = "API & Database Control",
             fontWeight = FontWeight.Black,
             fontSize = 20.sp,
             color = MaterialTheme.colorScheme.onSurface
         )
 
         Text(
-            text = "Configure credential keys to customize the dashboard triggers. By default, standard public API limits and pre-loaded models are applied.",
+            text = "Configure credential keys and enterprise PostgreSQL database server configurations to tune and pull custom tables end-to-end.",
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+        // PostgreSQL Config Block
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("PostgreSQL Backend Database Server", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+                
+                Text(
+                    "Define connection schema credentials. Economic indicators will sync directly from backend database tables (yfinance_ohlcv, fred_data, sec_submissions, news_sentiment).",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextField(
+                        value = tempPgHost,
+                        onValueChange = { tempPgHost = it },
+                        label = { Text("Server Host / IP", fontSize = 11.sp) },
+                        modifier = Modifier.weight(2f),
+                        singleLine = true,
+                        colors = TextFieldDefaults.colors()
+                    )
+                    TextField(
+                        value = tempPgPort,
+                        onValueChange = { tempPgPort = it },
+                        label = { Text("Port", fontSize = 11.sp) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        colors = TextFieldDefaults.colors()
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextField(
+                        value = tempPgDatabase,
+                        onValueChange = { tempPgDatabase = it },
+                        label = { Text("Database Name", fontSize = 11.sp) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        colors = TextFieldDefaults.colors()
+                    )
+                    TextField(
+                        value = tempPgUsername,
+                        onValueChange = { tempPgUsername = it },
+                        label = { Text("DB Schema User", fontSize = 11.sp) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        colors = TextFieldDefaults.colors()
+                    )
+                }
+
+                TextField(
+                    value = tempPgGatewayUrl,
+                    onValueChange = { tempPgGatewayUrl = it },
+                    label = { Text("REST API Gateway Tunnel URL", fontSize = 11.sp) },
+                    placeholder = { Text("http://10.0.2.2:8000/api/") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = TextFieldDefaults.colors()
+                )
+
+                // Connectivity Test Button
+                Button(
+                    onClick = { viewModel.testPostgresConnection() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Test Connection Protocol", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+
+                // Verify result
+                if (pgTestState != "IDLE") {
+                    val (statusColor, statusText) = when {
+                        pgTestState == "TESTING" -> Pair(MaterialTheme.colorScheme.primary, "Testing Server Reachability...")
+                        pgTestState.startsWith("SUCCESS") -> Pair(androidx.compose.ui.graphics.Color(0xFF10B981), "Connection Secured: PostgreSQL Online")
+                        else -> Pair(androidx.compose.ui.graphics.Color(0xFFEF4444), "Gateway Timeout: Using Emulated DB Node")
+                    }
+
+                    Surface(
+                        color = statusColor.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = statusText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = statusColor,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+            }
+        }
 
         // BLS API Key block
         Card(
@@ -1425,6 +1576,7 @@ fun SettingsPanelContent(
             Button(
                 onClick = {
                     viewModel.saveApiKeys(tempBlsKey, tempGeminiKey)
+                    viewModel.savePostgresConfig(tempPgHost, tempPgPort, tempPgDatabase, tempPgUsername, tempPgGatewayUrl)
                     onDismiss()
                 },
                 modifier = Modifier
@@ -1437,3 +1589,59 @@ fun SettingsPanelContent(
         }
     }
 }
+
+@Composable
+fun HeaderStatusIndicator(
+    viewModel: EconomicViewModel,
+    modifier: Modifier = Modifier
+) {
+    val systemStatus by viewModel.systemStatus.collectAsStateWithLifecycle()
+    
+    var bgColor = Color(0xFFD1FAE5)
+    var contentColor = Color(0xFF065F46)
+    var statusLabel = "Up-to-Date"
+    var icon = Icons.Default.CheckCircle
+
+    when (systemStatus) {
+        "syncing" -> {
+            bgColor = MaterialTheme.colorScheme.primaryContainer
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            statusLabel = "Syncing"
+            icon = Icons.Default.Refresh
+        }
+        "experiencing issues" -> {
+            bgColor = Color(0xFFFFE4E6)
+            contentColor = Color(0xFF9F1239)
+            statusLabel = "Issues"
+            icon = Icons.Default.Warning
+        }
+    }
+
+    Surface(
+        color = bgColor,
+        contentColor = contentColor,
+        shape = RoundedCornerShape(16.dp),
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { viewModel.queryBackendStatus() }
+            .testTag("header_status_indicator")
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = "Status: $statusLabel",
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                text = statusLabel,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+

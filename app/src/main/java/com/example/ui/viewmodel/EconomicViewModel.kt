@@ -86,6 +86,29 @@ class EconomicViewModel(private val repository: EconomicRepository) : ViewModel(
             initialValue = emptyList()
         )
 
+    val systemStatus: StateFlow<String> = kotlinx.coroutines.flow.combine(
+        recentLogs,
+        refreshState
+    ) { logs, refState ->
+        when {
+            refState is RefreshUiState.Loading -> "syncing"
+            logs.any { it.status.startsWith("FAILURE") } -> "experiencing issues"
+            else -> "up-to-date"
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = "up-to-date"
+    )
+
+    fun queryBackendStatus() {
+        viewModelScope.launch {
+            _refreshState.value = RefreshUiState.Loading
+            repository.testPostgresConnection()
+            _refreshState.value = RefreshUiState.Idle
+        }
+    }
+
     fun clearAllLogs() {
         viewModelScope.launch {
             repository.clearLogs()
@@ -100,6 +123,67 @@ class EconomicViewModel(private val repository: EconomicRepository) : ViewModel(
     val geminiApiKey: StateFlow<String> = repository.observeSetting("gemini_api_key")
         .map { it?.value ?: "" }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
+    // Postgres Server Settings State
+    val pgHost: StateFlow<String> = repository.observeSetting("pg_host")
+        .map { it?.value ?: "127.0.0.1" }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "127.0.0.1")
+
+    val pgPort: StateFlow<String> = repository.observeSetting("pg_port")
+        .map { it?.value ?: "5432" }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "5432")
+
+    val pgDatabase: StateFlow<String> = repository.observeSetting("pg_database")
+        .map { it?.value ?: "macro_pulse_db" }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "macro_pulse_db")
+
+    val pgUsername: StateFlow<String> = repository.observeSetting("pg_username")
+        .map { it?.value ?: "postgres" }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "postgres")
+
+    val pgGatewayUrl: StateFlow<String> = repository.observeSetting("pg_gateway_url")
+        .map { it?.value ?: "http://10.0.2.2:8000/api/" }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "http://10.0.2.2:8000/api/")
+
+    // PostgreSQL Status & Testing
+    private val _pgTestState = MutableStateFlow<String>("IDLE") // IDLE, TESTING, SUCCESS: total_records, ERROR
+    val pgTestState: StateFlow<String> = _pgTestState.asStateFlow()
+
+    fun testPostgresConnection() {
+        viewModelScope.launch {
+            _pgTestState.value = "TESTING"
+            val res = repository.testPostgresConnection()
+            res.fold(
+                onSuccess = { info ->
+                    _pgTestState.value = "SUCCESS: Host=${info.host}, Port=${info.port}, Records=${info.totalRecords}"
+                },
+                onFailure = { err ->
+                    _pgTestState.value = "ERROR: ${err.localizedMessage ?: "Failed connection"}"
+                }
+            )
+        }
+    }
+
+    fun clearPgTestState() {
+        _pgTestState.value = "IDLE"
+    }
+
+    // Direct synchronization from Postgres Database Server
+    fun syncSelectedSeriesFromPostgres() {
+        val seriesId = _selectedSeriesId.value
+        viewModelScope.launch {
+            _refreshState.value = RefreshUiState.Loading
+            val result = repository.syncAllFromPostgres(seriesId)
+            result.fold(
+                onSuccess = { count ->
+                    _refreshState.value = RefreshUiState.Success
+                },
+                onFailure = { err ->
+                    _refreshState.value = RefreshUiState.Error(err.localizedMessage ?: "Postgres query failed.")
+                }
+            )
+        }
+    }
 
     init {
         // Seed database immediately on first run
@@ -207,6 +291,17 @@ class EconomicViewModel(private val repository: EconomicRepository) : ViewModel(
         viewModelScope.launch {
             repository.saveSetting("bls_api_key", blsKey.trim())
             repository.saveSetting("gemini_api_key", geminiKey.trim())
+        }
+    }
+
+    // Save PostgreSQL Database server connection configurations
+    fun savePostgresConfig(host: String, port: String, dbName: String, dbUser: String, gatewayUrl: String) {
+        viewModelScope.launch {
+            repository.saveSetting("pg_host", host.trim())
+            repository.saveSetting("pg_port", port.trim())
+            repository.saveSetting("pg_database", dbName.trim())
+            repository.saveSetting("pg_username", dbUser.trim())
+            repository.saveSetting("pg_gateway_url", gatewayUrl.trim())
         }
     }
 
