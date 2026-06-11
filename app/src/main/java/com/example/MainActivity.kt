@@ -14,6 +14,7 @@ import com.example.data.repository.EconomicRepository
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.EconomicViewModel
+import com.example.data.worker.DataOrchestratorWorker
 
 class MainActivity : ComponentActivity() {
     private lateinit var db: AppDatabase
@@ -32,6 +33,9 @@ class MainActivity : ComponentActivity() {
 
         repository = EconomicRepository(db)
         viewModel = EconomicViewModel(repository)
+
+        // Schedule background data updates to iterate through data registry sources
+        DataOrchestratorWorker.scheduleDailyUpdates(applicationContext)
 
         enableEdgeToEdge()
         setContent {
