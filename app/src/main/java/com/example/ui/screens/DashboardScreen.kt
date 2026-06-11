@@ -7,6 +7,9 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,13 +42,15 @@ import com.example.ui.viewmodel.EconomicViewModel
 import com.example.ui.viewmodel.RefreshUiState
 import kotlin.math.roundToInt
 
+enum class DashboardTab { Home, Sources, Settings }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     viewModel: EconomicViewModel,
     modifier: Modifier = Modifier
 ) {
-    var showSettings by remember { mutableStateOf(false) }
+    var currentTab by remember { mutableStateOf(DashboardTab.Home) }
     var detailActiveInMobile by remember { mutableStateOf(false) }
 
     val filteredList by viewModel.filteredSeries.collectAsStateWithLifecycle()
@@ -104,11 +109,11 @@ fun DashboardScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { showSettings = !showSettings },
+                        onClick = { currentTab = if (currentTab == DashboardTab.Settings) DashboardTab.Home else DashboardTab.Settings },
                         modifier = Modifier.testTag("settings_toggle_button")
                     ) {
                         Icon(
-                            imageVector = if (showSettings) Icons.Default.Close else Icons.Default.Settings,
+                            imageVector = if (currentTab == DashboardTab.Settings) Icons.Default.Close else Icons.Default.Settings,
                             contentDescription = "API Keys Control panel"
                         )
                     }
@@ -118,6 +123,25 @@ fun DashboardScreen(
                     titleContentColor = MaterialTheme.colorScheme.onBackground
                 )
             )
+        },
+        bottomBar = {
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surface,
+                tonalElevation = 8.dp
+            ) {
+                NavigationBarItem(
+                    selected = currentTab == DashboardTab.Home,
+                    onClick = { currentTab = DashboardTab.Home },
+                    icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
+                    label = { Text("Home", fontSize = 11.sp) }
+                )
+                NavigationBarItem(
+                    selected = currentTab == DashboardTab.Sources,
+                    onClick = { currentTab = DashboardTab.Sources },
+                    icon = { Icon(Icons.Default.List, contentDescription = "Sources") },
+                    label = { Text("Sources", fontSize = 11.sp) }
+                )
+            }
         }
     ) { innerPadding ->
         BoxWithConstraints(
@@ -127,12 +151,14 @@ fun DashboardScreen(
         ) {
             val isWideScreen = maxWidth > 720.dp
 
-            if (showSettings) {
+            if (currentTab == DashboardTab.Settings) {
                 // Settings Overlay Drawer
                 SettingsPanelContent(
                     viewModel = viewModel,
-                    onDismiss = { showSettings = false }
+                    onDismiss = { currentTab = DashboardTab.Home }
                 )
+            } else if (currentTab == DashboardTab.Sources) {
+                DataSourcesView()
             } else {
                 if (isWideScreen) {
                     // Canonical List-Detail Split Grid Layout for Tablets
@@ -147,6 +173,8 @@ fun DashboardScreen(
                                 .fillMaxHeight()
                                 .padding(start = 12.dp, top = 8.dp, bottom = 12.dp)
                         ) {
+                            GeometricSummaryHero()
+                            Spacer(modifier = Modifier.height(12.dp))
                             CategoryTabsRow(
                                 activeCategory = currentCategory,
                                 selectAction = { viewModel.selectCategory(it) }
@@ -170,12 +198,12 @@ fun DashboardScreen(
                                 .padding(end = 12.dp, top = 8.dp, bottom = 12.dp)
                                 .background(
                                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                    shape = RoundedCornerShape(16.dp)
+                                    shape = RoundedCornerShape(28.dp)
                                 )
                                 .border(
                                     width = 1.dp,
                                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                                    shape = RoundedCornerShape(16.dp)
+                                    shape = RoundedCornerShape(28.dp)
                                 )
                         ) {
                             selectedSeriesDetails?.let { details ->
@@ -257,6 +285,8 @@ fun DashboardScreen(
                                     .fillMaxSize()
                                     .padding(horizontal = 12.dp, vertical = 8.dp)
                             ) {
+                                GeometricSummaryHero()
+                                Spacer(modifier = Modifier.height(12.dp))
                                 CategoryTabsRow(
                                     activeCategory = currentCategory,
                                     selectAction = { viewModel.selectCategory(it) }
@@ -339,7 +369,7 @@ fun MacroInteractiveChart(
     if (dataPoints.isEmpty()) {
         Box(
             modifier = modifier
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
                 .fillMaxWidth(),
             contentAlignment = Alignment.Center
         ) {
@@ -438,12 +468,12 @@ fun MacroInteractiveChart(
                 .fillMaxWidth()
                 .background(
                     color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(24.dp)
                 )
                 .border(
                     width = 1.dp,
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(24.dp)
                 )
                 .padding(horizontal = 16.dp, vertical = 20.dp)
                 .pointerInput(dataPoints) {
@@ -500,20 +530,48 @@ fun MacroInteractiveChart(
             val path = Path()
             val fillPath = Path()
 
+            // Optional Moving Average for multi-line context
+            val maPath = Path()
+            val maPeriod = 3
+            val useMaPath = dataPoints.size >= maPeriod
+
             dataPoints.forEachIndexed { idx, pt ->
                 val cx = idx * stepX
                 val cy = chartH - (((pt.value - displayMin) / displayRange).toFloat() * chartH)
+                
                 if (idx == 0) {
                     path.moveTo(cx, cy)
                     fillPath.moveTo(cx, chartH)
                     fillPath.lineTo(cx, cy)
                 } else {
-                    path.lineTo(cx, cy)
-                    fillPath.lineTo(cx, cy)
+                    val prevX = (idx - 1) * stepX
+                    val prevCy = chartH - (((dataPoints[idx - 1].value - displayMin) / displayRange).toFloat() * chartH)
+                    val controlX = (prevX + cx) / 2
+                    path.cubicTo(controlX, prevCy, controlX, cy, cx, cy)
+                    fillPath.cubicTo(controlX, prevCy, controlX, cy, cx, cy)
                 }
+                
                 if (idx == dataPoints.lastIndex) {
                     fillPath.lineTo(cx, chartH)
                     fillPath.close()
+                }
+
+                // Compute Moving Average points
+                if (useMaPath && idx >= maPeriod - 1) {
+                    val sum = (0 until maPeriod).sumOf { dataPoints[idx - it].value }
+                    val maVal = sum / maPeriod
+                    val maY = chartH - (((maVal - displayMin) / displayRange).toFloat() * chartH)
+                    
+                    if (idx == maPeriod - 1) {
+                        maPath.moveTo(cx, maY)
+                    } else {
+                        val prevMaX = (idx - 1) * stepX
+                        val prevSum = (0 until maPeriod).sumOf { dataPoints[idx - 1 - it].value }
+                        val prevMaVal = prevSum / maPeriod
+                        val prevMaY = chartH - (((prevMaVal - displayMin) / displayRange).toFloat() * chartH)
+                        val mControlX = (prevMaX + cx) / 2
+                        maPath.cubicTo(mControlX, prevMaY, mControlX, maY, cx, maY)
+                    }
                 }
             }
 
@@ -534,6 +592,19 @@ fun MacroInteractiveChart(
                 color = primaryColor,
                 style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
             )
+            
+            // 4b. Draw Multi-line moving average
+            if (useMaPath) {
+                drawPath(
+                    path = maPath,
+                    color = primaryColor.copy(alpha = 0.5f),
+                    style = Stroke(
+                        width = 2.dp.toPx(),
+                        cap = StrokeCap.Round,
+                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 10f))
+                    )
+                )
+            }
 
             // 5. Draw interactive node values
             dataPoints.forEachIndexed { idx, pt ->
@@ -595,6 +666,82 @@ fun MacroInteractiveChart(
     }
 }
 
+@Composable
+fun GeometricSummaryHero() {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        shape = RoundedCornerShape(28.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(
+                        text = "Market Sentiment",
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+                Text(
+                    text = "Updated 12m ago",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Column {
+                    Text(
+                        text = "Stable",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 32.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = "UNDERLYING",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.sp,
+                        letterSpacing = 1.5.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    )
+                }
+                
+                Surface(
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text("↑", color = Color(0xFF10B981), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("1.2%", color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Sidebar categories row
 @Composable
 fun CategoryTabsRow(
@@ -644,9 +791,11 @@ fun IndicatorsList(
         return
     }
 
-    LazyColumn(
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         items(seriesList, key = { it.id }) { series ->
             val isSelected = series.id == selectedId
@@ -685,7 +834,7 @@ fun IndicatorsList(
             Surface(
                 onClick = { onItemClick(series.id) },
                 color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(24.dp),
                 border = BorderStroke(
                     width = 1.2.dp,
                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
@@ -693,26 +842,33 @@ fun IndicatorsList(
                 tonalElevation = if (isSelected) 4.dp else 0.dp,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .aspectRatio(1f)
                     .testTag("series_item_${series.id}")
             ) {
-                Row(
+                Column(
                     modifier = Modifier
-                        .padding(horizontal = 14.dp, vertical = 14.dp)
-                        .fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(14.dp)
+                        .fillMaxSize(),
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = series.name,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(bottom = 2.dp)
-                        )
+                    Column {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = series.id.take(1),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                             Text(
                                 text = series.id,
                                 fontFamily = FontFamily.Monospace,
@@ -720,51 +876,50 @@ fun IndicatorsList(
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold
                             )
-                            Box(
-                                modifier = Modifier
-                                    .size(3.dp)
-                                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
-                            )
-                            Text(
-                                text = series.category,
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Medium
-                            )
                         }
-                    }
-
-                    // Micro preview Sparkline trace
-                    if (pts.isNotEmpty()) {
-                        MicroSparkline(
-                            dataPoints = pts,
-                            lineColor = badgeColor,
-                            modifier = Modifier
-                                .width(60.dp)
-                                .height(22.dp)
-                                .padding(horizontal = 4.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        modifier = Modifier.widthIn(min = 60.dp)
-                    ) {
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "$displayValue${series.unit}",
-                            fontWeight = FontWeight.Black,
-                            fontSize = 15.sp,
+                            text = series.name,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            maxLines = 2,
+                            lineHeight = 14.sp,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        if (pctDiff != 0.0) {
-                            Text(
-                                text = "${if (pctDiff > 0) "+" else ""}${String.format("%.2f", pctDiff)}%",
-                                fontSize = 10.sp,
-                                color = badgeColor,
-                                fontWeight = FontWeight.Bold
+                    }
+
+                    Column {
+                        // Micro preview Sparkline trace
+                        if (pts.isNotEmpty()) {
+                            MicroSparkline(
+                                dataPoints = pts,
+                                lineColor = badgeColor,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(24.dp)
+                                    .padding(bottom = 6.dp)
                             )
+                        }
+                        
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Bottom,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "$displayValue${series.unit}",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 18.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            if (pctDiff != 0.0) {
+                                Text(
+                                    text = "${if (pctDiff > 0) "+" else ""}${String.format("%.2f", pctDiff)}%",
+                                    fontSize = 10.sp,
+                                    color = badgeColor,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
@@ -864,7 +1019,7 @@ fun DetailPanel(
         // 1. Economic model interactive simulator forecasting
         Surface(
             color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(24.dp),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
@@ -977,7 +1132,7 @@ fun DetailPanel(
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
             ),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(24.dp),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
@@ -1099,7 +1254,7 @@ fun DetailPanel(
             )
             Surface(
                 color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(24.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 6.dp)
@@ -1198,7 +1353,7 @@ fun SettingsPanelContent(
         // BLS API Key block
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(24.dp)
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1227,7 +1382,7 @@ fun SettingsPanelContent(
         // Gemini API Key block
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(24.dp)
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
