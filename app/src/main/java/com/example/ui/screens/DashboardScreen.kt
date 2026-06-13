@@ -423,62 +423,130 @@ fun MacroInteractiveChart(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 6.dp)
-                .height(44.dp),
+                .heightIn(min = 54.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             if (hoverIndex != null && hoverIndex!! in dataPoints.indices) {
                 val pt = dataPoints[hoverIndex!!]
-                Row(
+                
+                // Delta Calculations
+                val prevPt = if (hoverIndex!! > 0) dataPoints[hoverIndex!! - 1] else null
+                val firstPt = dataPoints.firstOrNull()
+
+                val (popText, popColor) = if (prevPt != null) {
+                    val diff = pt.value - prevPt.value
+                    val pct = if (prevPt.value != 0.0) (diff / prevPt.value) * 100.0 else 0.0
+                    val diffRounded = Math.round(diff * 100.0) / 100.0
+                    val pctRounded = Math.round(pct * 10.0) / 10.0
+                    val diffStr = if (diffRounded >= 0) "+$diffRounded" else "$diffRounded"
+                    val pctStr = if (pctRounded >= 0) "+$pctRounded%" else "$pctRounded%"
+                    val arrow = if (diff >= 0.0) "▲" else "▼"
+                    val color = if (diff >= 0.0) Color(0xFF10B981) else Color(0xFFEF4444)
+                    Pair("$arrow $diffStr ($pctStr) MoM/QoQ", color)
+                } else {
+                    Pair("Initial Data Point", MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f))
+                }
+
+                val (cumText, cumColor) = if (firstPt != null && firstPt != pt) {
+                    val diff = pt.value - firstPt.value
+                    val pct = if (firstPt.value != 0.0) (diff / firstPt.value) * 100.0 else 0.0
+                    val diffRounded = Math.round(diff * 100.0) / 100.0
+                    val pctRounded = Math.round(pct * 10.0) / 10.0
+                    val diffStr = if (diffRounded >= 0) "+$diffRounded" else "$diffRounded"
+                    val pctStr = if (pctRounded >= 0) "+$pctRounded%" else "$pctRounded%"
+                    val arrow = if (diff >= 0.0) "▲" else "▼"
+                    val color = if (diff >= 0.0) Color(0xFF0EA5E9) else Color(0xFFF43F5E)
+                    Pair("$arrow $diffStr ($pctStr) Cum.", color)
+                } else {
+                    Pair("", Color.Transparent)
+                }
+
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
                             color = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp),
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(12.dp)
                         )
-                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(
-                                    color = if (pt.isCustom) forecastColor else primaryColor,
-                                    shape = RoundedCornerShape(4.dp)
-                                )
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            "${pt.periodName} ${pt.year}",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        if (pt.isCustom) {
-                            Badge(
-                                modifier = Modifier.padding(start = 6.dp),
-                                containerColor = forecastColor.copy(alpha = 0.2f),
-                                contentColor = forecastColor
-                            ) {
-                                Text("SIMULATED", fontSize = 9.sp, fontWeight = FontWeight.Black)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(
+                                        color = if (pt.isCustom) forecastColor else primaryColor,
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "${pt.periodName} ${pt.year}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            if (pt.isCustom) {
+                                Badge(
+                                    modifier = Modifier.padding(start = 6.dp),
+                                    containerColor = forecastColor.copy(alpha = 0.2f),
+                                    contentColor = forecastColor
+                                ) {
+                                    Text("SIMULATED", fontSize = 9.sp, fontWeight = FontWeight.Black)
+                                }
                             }
                         }
+                        
+                        Text(
+                            "${pt.value} $unitLabel",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
-                    Text(
-                        "${pt.value} $unitLabel",
-                        fontWeight = FontWeight.Black,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = popText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = popColor
+                        )
+
+                        if (cumText.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .size(3.dp)
+                                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
+                            )
+
+                            Text(
+                                text = cumText,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = cumColor
+                            )
+                        }
+                    }
                 }
             } else {
                 Text(
-                    "💡 Drag along the chart to scan historical and simulated data.",
+                    "💡 Drag along the chart to scan historical trends, simulated forecasts, and calculated deltas.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 4.dp)
                 )
             }
         }
@@ -2422,6 +2490,7 @@ fun RechartsUnifiedComparisonChart(
         ) {
             if (hoverIndex != null && hoverIndex!! in uniquePeriods.indices) {
                 val targetKey = uniquePeriods[hoverIndex!!]
+                val prevPeriodKey = if (hoverIndex!! > 0) uniquePeriods[hoverIndex!! - 1] else null
                 val yr = targetKey / 12
                 val mo = targetKey % 12
                 val periodLabel = getPeriodNameLabel(mo) + " " + yr
@@ -2434,21 +2503,29 @@ fun RechartsUnifiedComparisonChart(
                             shape = RoundedCornerShape(12.dp)
                         )
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "📅 $periodLabel",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.padding(end = 12.dp)
-                    )
+                    ) {
+                        Text(
+                            text = "📅",
+                            fontSize = 16.sp
+                        )
+                        Text(
+                            text = periodLabel,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         dataMap.forEach { (seriesId, list) ->
                             val pt = list.find {
@@ -2460,29 +2537,78 @@ fun RechartsUnifiedComparisonChart(
                                 }
                                 yrVal * 12 + moVal == targetKey
                             }
+
+                            val prevPt = if (prevPeriodKey != null && pt != null) {
+                                list.find {
+                                    val yrVal = it.year.toIntOrNull() ?: 0
+                                    val moVal = when {
+                                        it.period.startsWith("M") -> it.period.substring(1).toIntOrNull() ?: 1
+                                        it.period.startsWith("Q") -> (it.period.substring(1).toIntOrNull() ?: 1) * 3
+                                        else -> 1
+                                    }
+                                    yrVal * 12 + moVal == prevPeriodKey
+                                }
+                            } else null
+
                             if (pt != null) {
                                 val color = getSeriesColor(seriesId)
+                                val (deltaText, deltaColor) = if (prevPt != null) {
+                                    val diff = pt.value - prevPt.value
+                                    val pct = if (prevPt.value != 0.0) (diff / prevPt.value) * 100.0 else 0.0
+                                    val diffRounded = Math.round(diff * 100.0) / 100.0
+                                    val pctRounded = Math.round(pct * 10.0) / 10.0
+                                    val diffStr = if (diffRounded >= 0) "+$diffRounded" else "$diffRounded"
+                                    val pctStr = if (pctRounded >= 0) "+$pctRounded%" else "$pctRounded%"
+                                    val arrow = if (diff >= 0.0) "▲" else "▼"
+                                    val deltaClr = if (diff >= 0.0) Color(0xFF10B981) else Color(0xFFEF4444)
+                                    Pair("$arrow $diffStr ($pctStr)", deltaClr)
+                                } else {
+                                    Pair("Initial", MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                                }
+
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(6.dp)
-                                            .background(color, RoundedCornerShape(2.dp))
-                                    )
-                                    Text(
-                                        text = "${seriesList.find { it.id == seriesId }?.name ?: seriesId}: ",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Text(
-                                        text = "${pt.value} ${seriesList.find { it.id == seriesId }?.unit ?: ""}",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = color
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .background(color, RoundedCornerShape(2.dp))
+                                        )
+                                        Text(
+                                            text = seriesList.find { it.id == seriesId }?.name ?: seriesId,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "${pt.value} ${seriesList.find { it.id == seriesId }?.unit ?: ""}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = color
+                                        )
+                                        
+                                        Text(
+                                            text = deltaText,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = deltaColor
+                                        )
+                                    }
                                 }
                             }
                         }
