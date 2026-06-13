@@ -198,18 +198,42 @@ class EconomicRepository(private val db: AppDatabase) {
         }
 
         // Simulating different data sets to reflect database table structures (unemployment, earnings, etc.)
-        val randomOffset = (0..50).random() * 0.05
+        val baseValue = when (seriesId) {
+            "CES0000000001" -> 160000.0 // Nonfarm Employment
+            "JTS000000000000000JOL" -> 8000.0 // Job Openings
+            "CUSR0000SA0L1E" -> 325.0 // Core CPI
+            "CUUR0000SA0" -> 318.0 // Headline CPI
+            "CUSR0000SA0H1" -> 405.0 // Shelter CPI
+            "WPUFD49207" -> 248.0 // PPI Final Demand
+            "CIS2010000000000I" -> 170.0 // Employment Cost Index
+            "PRS85006093" -> 115.0 // Labor Productivity
+            "CES0500000003" -> 36.0 // Avg Hourly Earnings
+            "CES0500000007" -> 34.2 // Avg Weekly Hours
+            "LNS11300060" -> 83.8 // Labor Force Participation Prime-Age
+            "LNS12300000" -> 62.5 // Labor Force Participation Aggregate
+            "LNS13327709" -> 7.7 // Underemployment U-6
+            else -> 4.1 // Unemployment U-3/Default
+        }
+
+        val trendMultiplier = when (seriesId) {
+            "LNS14000000", "LNS13327709" -> listOf(0.95, 0.98, 1.05, 1.02, 1.00, 1.01, 1.03, 1.02, 0.99, 0.98) // Unemployment fluctuations
+            "CES0500000007" -> listOf(1.0, 0.997, 0.994, 0.997, 0.994, 0.997, 0.991, 0.994, 0.997, 0.994) // Weekly Hours stable/slight drift
+            "JTS000000000000000QUR" -> listOf(1.15, 1.10, 1.05, 1.05, 1.00, 0.95, 0.95, 1.00, 1.05, 1.00) // Quits rate fluctuations
+            else -> listOf(0.975, 0.985, 0.992, 1.000, 1.005, 1.012, 1.018, 1.025, 1.031, 1.036) // Standard growing series (CPI, Earnings, Productivity, Employment)
+        }
+
+        val randomOffset = (0..50).random() * 0.001
         val simulatedPoints = listOf(
-            DataPointEntity(seriesId, "2024", "M01", "January", 3.7 + randomOffset),
-            DataPointEntity(seriesId, "2024", "M04", "April", 3.9 + randomOffset),
-            DataPointEntity(seriesId, "2024", "M07", "July", 4.1 + randomOffset),
-            DataPointEntity(seriesId, "2024", "M10", "October", 4.0 + randomOffset),
-            DataPointEntity(seriesId, "2025", "M01", "January", 4.2 + randomOffset),
-            DataPointEntity(seriesId, "2025", "M04", "April", 4.4 + randomOffset),
-            DataPointEntity(seriesId, "2025", "M07", "July", 4.2 + randomOffset),
-            DataPointEntity(seriesId, "2025", "M10", "October", 4.3 + randomOffset),
-            DataPointEntity(seriesId, "2026", "M01", "January", 4.5 + randomOffset),
-            DataPointEntity(seriesId, "2026", "M04", "April", 4.4 + randomOffset)
+            DataPointEntity(seriesId, "2024", "M01", "January", baseValue * (trendMultiplier[0] + randomOffset)),
+            DataPointEntity(seriesId, "2024", "M04", "April", baseValue * (trendMultiplier[1] + randomOffset)),
+            DataPointEntity(seriesId, "2024", "M07", "July", baseValue * (trendMultiplier[2] + randomOffset)),
+            DataPointEntity(seriesId, "2024", "M10", "October", baseValue * (trendMultiplier[3] + randomOffset)),
+            DataPointEntity(seriesId, "2025", "M01", "January", baseValue * (trendMultiplier[4] + randomOffset)),
+            DataPointEntity(seriesId, "2025", "M04", "April", baseValue * (trendMultiplier[5] + randomOffset)),
+            DataPointEntity(seriesId, "2025", "M07", "July", baseValue * (trendMultiplier[6] + randomOffset)),
+            DataPointEntity(seriesId, "2025", "M10", "October", baseValue * (trendMultiplier[7] + randomOffset)),
+            DataPointEntity(seriesId, "2026", "M01", "January", baseValue * (trendMultiplier[8] + randomOffset)),
+            DataPointEntity(seriesId, "2026", "M04", "April", baseValue * (trendMultiplier[9] + randomOffset))
         )
 
         dataPointDao.insertDataPoints(simulatedPoints)
@@ -378,11 +402,72 @@ class EconomicRepository(private val db: AppDatabase) {
         }
     }
 
+    // Generates a comprehensive macro climate summary across all indicator data
+    suspend fun generateEconomicClimateSummary(): String = withContext(Dispatchers.IO) {
+        val seriesList = db.seriesDao().getAllSeries().first()
+        if (seriesList.isEmpty()) {
+            return@withContext "No indicators defined in the local database. Seed initial data first."
+        }
+
+        val sb = StringBuilder()
+        sb.append("Here is the latest data for key macro-economic indicators:\n\n")
+
+        for (series in seriesList) {
+            val allPoints = db.dataPointDao().getDataPointsForSeriesList(series.id)
+                .filter { !it.isCustom }
+                .sortedWith(compareBy<DataPointEntity> { it.year }.thenBy { it.period })
+            
+            val latestPoints = allPoints.takeLast(3)
+            if (latestPoints.isNotEmpty()) {
+                sb.append("- **${series.name}** (${series.id} in ${series.unit}):\n")
+                latestPoints.forEach { pt ->
+                    sb.append("  * ${pt.periodName} ${pt.year}: ${pt.value}\n")
+                }
+            }
+        }
+
+        val apiKey = getSetting("gemini_api_key").takeIf { !it.isNullOrBlank() } ?: BuildConfig.GEMINI_API_KEY
+        if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
+            return@withContext "Error: Gemini API Key is missing. Please enter your Gemini API Key in the Settings menu to unlock overall economic climate summary."
+        }
+
+        val prompt = """
+            You are an expert Chief Economist, Federal Reserve Advisor, and Financial Market Analyst.
+            Analyze the overall economic climate based on the latest data points of these combined indicators:
+            
+            $sb
+            
+            Write a clear, professional, human-readable executive summary of the current economic climate in 3 concise paragraphs:
+            1. **Macro Synthesis**: A high-level assessment of whether the economy is expanding, cooling, or facing structural challenges (balancing job growth/unemployment, labor slack, retail inflation, and sector hours/compensation).
+            2. **Trend Intersections**: Highlight key connections (e.g., how wage growth and productivity relate, or how vacancies and quits correspond to inflation).
+            3. **Forward Market Outlook**: What these combined dynamics imply for Federal Reserve policy, bond yields, and capital markets over the next 3 to 6 months.
+
+            Keep the tone neutral, insight-heavy, and actionable for top investment managers. Use standard markdown for formatting. Do not include introductory fluff or conversational greetings.
+        """.trimIndent()
+
+        try {
+            val request = GeminiRequest(
+                contents = listOf(
+                    GeminiContent(parts = listOf(GeminiPart(text = prompt)))
+                ),
+                generationConfig = GeminiGenerationConfig(temperature = 0.3f),
+                systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = "You are a senior macroeconomist advising legendary asset managers.")))
+            )
+            
+            val response = geminiService.generateContent(apiKey, request)
+            response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text 
+                ?: "Received empty response from Gemini API for economic climate summary. Please try again."
+        } catch (e: Exception) {
+            "Failed when contacting Gemini API: ${e.localizedMessage}. Please verify your API Key and internet connectivity."
+        }
+    }
+
     // Populates standard economic metadata and authentic initial data points
     // so the application begins with rich, useful context.
     suspend fun seedInitialData() {
         val existingSeries = db.seriesDao().getAllSeries().first()
-        if (existingSeries.isNotEmpty()) return // Already seeded
+        val existingIds = existingSeries.map { it.id }.toSet()
+        if (existingIds.contains("CUSR0000SA0H1")) return // Already seeded with updated series
 
         val defaultSeries = listOf(
             SeriesEntity(
@@ -455,6 +540,14 @@ class EconomicRepository(private val db: AppDatabase) {
                 category = "Inflation & Prices",
                 description = "All-items consumer price index tracking urban consumer retail prices.",
                 significance = "Direct driver of cost-of-living updates (Social Security) and public pricing expectations.",
+                unit = "Index"
+            ),
+            SeriesEntity(
+                id = "CUSR0000SA0H1",
+                name = "CPI-U: Shelter",
+                category = "Inflation & Prices",
+                description = "Tracks monthly consumer rent and owners' equivalent rent components representing retail housing price pressures.",
+                significance = "Shelter makes up over one-third of the total CPI basket. High shelter inflation signals long-term sticky core inflation trends monitored by the Fed.",
                 unit = "Index"
             ),
             SeriesEntity(
@@ -559,6 +652,18 @@ class EconomicRepository(private val db: AppDatabase) {
             DataPointEntity("CUUR0000SA0", "2025", "M10", "October", 322.8),
             DataPointEntity("CUUR0000SA0", "2026", "M01", "January", 323.9),
             DataPointEntity("CUUR0000SA0", "2026", "M04", "April", 325.2),
+
+            // CPI-U: Shelter
+            DataPointEntity("CUSR0000SA0H1", "2024", "M01", "January", 390.2),
+            DataPointEntity("CUSR0000SA0H1", "2024", "M04", "April", 394.5),
+            DataPointEntity("CUSR0000SA0H1", "2024", "M07", "July", 398.3),
+            DataPointEntity("CUSR0000SA0H1", "2024", "M10", "October", 402.1),
+            DataPointEntity("CUSR0000SA0H1", "2025", "M01", "January", 405.6),
+            DataPointEntity("CUSR0000SA0H1", "2025", "M04", "April", 409.1),
+            DataPointEntity("CUSR0000SA0H1", "2025", "M07", "July", 412.4),
+            DataPointEntity("CUSR0000SA0H1", "2025", "M10", "October", 415.7),
+            DataPointEntity("CUSR0000SA0H1", "2026", "M01", "January", 419.0),
+            DataPointEntity("CUSR0000SA0H1", "2026", "M04", "April", 422.3),
 
             // PPI Final Demand
             DataPointEntity("WPUFD49207", "2024", "M01", "January", 243.1),

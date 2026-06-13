@@ -38,6 +38,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.DataPointEntity
 import com.example.data.local.SeriesEntity
 import com.example.ui.viewmodel.AnalysisUiState
+import com.example.ui.viewmodel.ClimateSummaryUiState
 import com.example.ui.viewmodel.EconomicViewModel
 import com.example.ui.viewmodel.RefreshUiState
 import kotlin.math.roundToInt
@@ -176,6 +177,10 @@ fun DashboardScreen(
                                 .padding(start = 12.dp, top = 8.dp, bottom = 12.dp)
                         ) {
                             GeometricSummaryHero()
+                            Spacer(modifier = Modifier.height(10.dp))
+                            DateRangeFilterSection(viewModel = viewModel)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            GlobalClimateSummaryCard(viewModel = viewModel)
                             Spacer(modifier = Modifier.height(12.dp))
                             CategoryTabsRow(
                                 activeCategory = currentCategory,
@@ -290,6 +295,10 @@ fun DashboardScreen(
                                     .padding(horizontal = 12.dp, vertical = 8.dp)
                             ) {
                                 GeometricSummaryHero()
+                                Spacer(modifier = Modifier.height(10.dp))
+                                DateRangeFilterSection(viewModel = viewModel)
+                                Spacer(modifier = Modifier.height(10.dp))
+                                GlobalClimateSummaryCard(viewModel = viewModel)
                                 Spacer(modifier = Modifier.height(12.dp))
                                 CategoryTabsRow(
                                     activeCategory = currentCategory,
@@ -670,6 +679,462 @@ fun MacroInteractiveChart(
     }
 }
 
+// ---------------- BEGIN NEW DATE Horizon AND AI CLIMATE Synthesis COMPONENTS ----------------
+
+@Composable
+fun DateRangeFilterSection(
+    viewModel: EconomicViewModel,
+    modifier: Modifier = Modifier
+) {
+    val startYear by viewModel.startYear.collectAsStateWithLifecycle()
+    val startMonth by viewModel.startMonth.collectAsStateWithLifecycle()
+    val endYear by viewModel.endYear.collectAsStateWithLifecycle()
+    val endMonth by viewModel.endMonth.collectAsStateWithLifecycle()
+
+    val years = listOf(2024, 2025, 2026)
+    val monthsShort = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+    var isExpanded by remember { mutableStateOf(false) }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(16.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("date_range_picker_card")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isExpanded = !isExpanded },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DateRange,
+                        contentDescription = "Date Range icon",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "Time Horizon Filter",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "${monthsShort[startMonth - 1]} $startYear — ${monthsShort[endMonth - 1]} $endYear",
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            if (isExpanded) {
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Start date selectors
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Start Period",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            // Month Dropdown Trigger
+                            MonthDropdown(
+                                selectedMonth = startMonth,
+                                months = monthsShort,
+                                onMonthSelected = { m ->
+                                    if (startYear * 12 + m <= endYear * 12 + endMonth) {
+                                        viewModel.setDateRange(startYear, m, endYear, endMonth)
+                                    }
+                                },
+                                modifier = Modifier.weight(1.2f)
+                            )
+                            // Year Dropdown Trigger
+                            PositiveIntDropdown(
+                                selectedValue = startYear,
+                                values = years,
+                                onValueSelected = { y ->
+                                    if (y * 12 + startMonth <= endYear * 12 + endMonth) {
+                                        viewModel.setDateRange(y, startMonth, endYear, endMonth)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    // End date selectors
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "End Period",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            // Month Dropdown Trigger
+                            MonthDropdown(
+                                selectedMonth = endMonth,
+                                months = monthsShort,
+                                onMonthSelected = { m ->
+                                    if (startYear * 12 + startMonth <= endYear * 12 + m) {
+                                        viewModel.setDateRange(startYear, startMonth, endYear, m)
+                                    }
+                                },
+                                modifier = Modifier.weight(1.2f)
+                            )
+                            // Year Dropdown Trigger
+                            PositiveIntDropdown(
+                                selectedValue = endYear,
+                                values = years,
+                                onValueSelected = { y ->
+                                    if (startYear * 12 + startMonth <= y * 12 + endMonth) {
+                                        viewModel.setDateRange(startYear, startMonth, y, endMonth)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(10.dp))
+                // Quick presets row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(
+                        onClick = {
+                            viewModel.setDateRange(2024, 1, 2026, 12)
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Text("Reset Horizon", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MonthDropdown(
+    selectedMonth: Int,
+    months: List<String>,
+    onMonthSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(months[selectedMonth - 1], fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            months.forEachIndexed { index, m ->
+                DropdownMenuItem(
+                    text = { Text(m, fontSize = 12.sp) },
+                    onClick = {
+                        onMonthSelected(index + 1)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun PositiveIntDropdown(
+    selectedValue: Int,
+    values: List<Int>,
+    onValueSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(selectedValue.toString(), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            values.forEach { v ->
+                DropdownMenuItem(
+                    text = { Text(v.toString(), fontSize = 12.sp) },
+                    onClick = {
+                        onValueSelected(v)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun GlobalClimateSummaryCard(
+    viewModel: EconomicViewModel,
+    modifier: Modifier = Modifier
+) {
+    val climateSummary by viewModel.climateSummaryState.collectAsStateWithLifecycle()
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.12f)
+        ),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(
+            width = 1.6.dp, 
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+        ),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("global_climate_summary_card")
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Gemini Synthesizer",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "AI Climate Executive Summary",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 13.5.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+
+                if (climateSummary is ClimateSummaryUiState.Success) {
+                    IconButton(
+                        onClick = { viewModel.generateEconomicClimateSummary() },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Regenerate Climate Summary",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            when (val state = climateSummary) {
+                is ClimateSummaryUiState.Idle -> {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Synthesize cross-indicator BLS metrics on labor supply, core inflation, and aggregate wages using Gemini AI for a professional macro outlook.",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 16.sp,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        Button(
+                            onClick = { viewModel.generateEconomicClimateSummary() },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            ),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            modifier = Modifier.testTag("generate_climate_summary_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Draft Executive Climate Summary", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                is ClimateSummaryUiState.Loading -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            text = "Synthesizing cross-indicator BLS data...",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+                is ClimateSummaryUiState.Success -> {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = state.markdownText,
+                                fontSize = 11.5.sp,
+                                lineHeight = 17.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+                is ClimateSummaryUiState.Error -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                    ) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = state.message,
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = { viewModel.generateEconomicClimateSummary() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        ) {
+                            Text("Retry Summary", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------- END NEW DATE Horizon AND AI CLIMATE Synthesis COMPONENTS ----------------
+
 @Composable
 fun GeometricSummaryHero() {
     Surface(
@@ -822,7 +1287,7 @@ fun IndicatorsList(
             val isFavorable = remember(series.id, isIncreasing) {
                 when {
                     series.id in listOf("LNS14000000", "LNS13327709") -> !isIncreasing // Unemployment going down is positive
-                    series.id in listOf("CUSR0000SA0L1E", "CUUR0000SA0", "WPUFD49207") -> !isIncreasing // Inflation slowing down is positive
+                    series.id in listOf("CUSR0000SA0L1E", "CUUR0000SA0", "WPUFD49207", "CUSR0000SA0H1") -> !isIncreasing // Inflation slowing down is positive
                     else -> isIncreasing // Wages, weekly hours, productivity, openings up is positive
                 }
             }

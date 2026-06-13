@@ -17,6 +17,13 @@ sealed interface AnalysisUiState {
     data class Error(val message: String) : AnalysisUiState
 }
 
+sealed interface ClimateSummaryUiState {
+    object Idle : ClimateSummaryUiState
+    object Loading : ClimateSummaryUiState
+    data class Success(val markdownText: String) : ClimateSummaryUiState
+    data class Error(val message: String) : ClimateSummaryUiState
+}
+
 sealed interface RefreshUiState {
     object Idle : RefreshUiState
     object Loading : RefreshUiState
@@ -56,19 +63,51 @@ class EconomicViewModel(private val repository: EconomicRepository) : ViewModel(
         list.find { it.id == id }
     }.stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = null)
 
-    // Dynamic Flow of observations for the selected Series
+    // Date Filters
+    private val _startYear = MutableStateFlow(2024)
+    val startYear: StateFlow<Int> = _startYear.asStateFlow()
+
+    private val _startMonth = MutableStateFlow(1)
+    val startMonth: StateFlow<Int> = _startMonth.asStateFlow()
+
+    private val _endYear = MutableStateFlow(2026)
+    val endYear: StateFlow<Int> = _endYear.asStateFlow()
+
+    private val _endMonth = MutableStateFlow(12)
+    val endMonth: StateFlow<Int> = _endMonth.asStateFlow()
+
+    // Dynamic Flow of observations for the selected Series, filtered dynamically by date range
     @OptIn(ExperimentalCoroutinesApi::class)
-    val selectedSeriesDataPoints: StateFlow<List<DataPointEntity>> = _selectedSeriesId
+    private val rawSeriesDataPoints: Flow<List<DataPointEntity>> = _selectedSeriesId
         .flatMapLatest { id -> repository.getDataPointsForSeries(id) }
-        .map { points ->
-            // Sort chronologically
-            points.sortedWith(compareBy<DataPointEntity> { it.year }.thenBy { it.period })
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+
+    val selectedSeriesDataPoints: StateFlow<List<DataPointEntity>> = combine(
+        rawSeriesDataPoints,
+        _startYear,
+        _startMonth,
+        _endYear,
+        _endMonth
+    ) { points, sY, sM, eY, eM ->
+        points.filter { pt ->
+            val monthNum = when {
+                pt.period.startsWith("M") -> pt.period.substring(1).toIntOrNull() ?: 1
+                pt.period.startsWith("Q") -> (pt.period.substring(1).toIntOrNull() ?: 1) * 3
+                else -> 1
+            }
+            val pointValue = pt.year.toIntOrNull()?.let { y -> y * 12 + monthNum } ?: 0
+            val startValue = sY * 12 + sM
+            val endValue = eY * 12 + eM
+            pointValue in startValue..endValue
+        }.sortedWith(compareBy<DataPointEntity> { it.year }.thenBy { it.period })
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    // Economic Climate Summary State
+    private val _climateSummaryState = MutableStateFlow<ClimateSummaryUiState>(ClimateSummaryUiState.Idle)
+    val climateSummaryState: StateFlow<ClimateSummaryUiState> = _climateSummaryState.asStateFlow()
 
     // AI Analysis State
     private val _analysisState = MutableStateFlow<AnalysisUiState>(AnalysisUiState.Idle)
@@ -303,6 +342,33 @@ class EconomicViewModel(private val repository: EconomicRepository) : ViewModel(
             repository.saveSetting("pg_username", dbUser.trim())
             repository.saveSetting("pg_gateway_url", gatewayUrl.trim())
         }
+    }
+
+    fun setDateRange(sYear: Int, sMonth: Int, eYear: Int, eMonth: Int) {
+        _startYear.value = sYear
+        _startMonth.value = sMonth
+        _endYear.value = eYear
+        _endMonth.value = eMonth
+    }
+
+    fun generateEconomicClimateSummary() {
+        viewModelScope.launch {
+            _climateSummaryState.value = ClimateSummaryUiState.Loading
+            try {
+                val summary = repository.generateEconomicClimateSummary()
+                if (summary.startsWith("Error:") || summary.startsWith("Failed")) {
+                    _climateSummaryState.value = ClimateSummaryUiState.Error(summary)
+                } else {
+                    _climateSummaryState.value = ClimateSummaryUiState.Success(summary)
+                }
+            } catch (e: Exception) {
+                _climateSummaryState.value = ClimateSummaryUiState.Error("Unexpected failure: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    fun clearClimateSummary() {
+        _climateSummaryState.value = ClimateSummaryUiState.Idle
     }
 
     // Factory to easily construct constructor dependencies
