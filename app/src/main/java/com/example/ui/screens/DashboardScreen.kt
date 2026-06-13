@@ -1,7 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.*
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -333,10 +334,66 @@ fun DashboardScreen(
 
 @Composable
 fun textPlaceholder(onBack: () -> Unit) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("No series selected")
-            Button(onClick = onBack) { Text("Go back") }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
+                    shape = RoundedCornerShape(24.dp)
+                )
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(24.dp)
+                )
+                .padding(24.dp)
+                .fillMaxWidth(0.9f)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = null,
+                modifier = Modifier.size(48.dp),
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Choose an Economic Indicator",
+                fontWeight = FontWeight.Black,
+                fontSize = 16.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Select any indicator from the index to reveal full-bleed historical charts, predictive models, and professional macro insights.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                lineHeight = 16.sp,
+                modifier = Modifier.padding(horizontal = 8.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = onBack,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Go Back", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -1213,10 +1270,60 @@ fun GlobalClimateSummaryCard(
 
 @Composable
 fun GeometricSummaryHero() {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val containerColor = MaterialTheme.colorScheme.primaryContainer
+    
     Surface(
-        color = MaterialTheme.colorScheme.primaryContainer,
+        color = Color.Transparent,
         shape = RoundedCornerShape(28.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        containerColor,
+                        containerColor.copy(alpha = 0.7f)
+                    )
+                ),
+                shape = RoundedCornerShape(28.dp)
+            )
+            .drawBehind {
+                val gridStep = 48.dp.toPx()
+                val lineAlpha = 0.08f
+                // Vertical grid lines
+                var x = 0f
+                while (x < size.width) {
+                    drawLine(
+                        color = primaryColor,
+                        start = Offset(x, 0f),
+                        end = Offset(x, size.height),
+                        strokeWidth = 1.dp.toPx(),
+                        alpha = lineAlpha
+                    )
+                    x += gridStep
+                }
+                // Horizontal grid lines
+                var y = 0f
+                while (y < size.height) {
+                    drawLine(
+                        color = primaryColor,
+                        start = Offset(0f, y),
+                        end = Offset(size.width, y),
+                        strokeWidth = 1.dp.toPx(),
+                        alpha = lineAlpha
+                    )
+                    y += gridStep
+                }
+                
+                // Technical diagonal wireframe trace
+                drawLine(
+                    color = primaryColor,
+                    start = Offset(0f, size.height * 0.75f),
+                    end = Offset(size.width, size.height * 0.15f),
+                    strokeWidth = 1.2.dp.toPx(),
+                    alpha = 0.12f
+                )
+            }
     ) {
         Column(
             modifier = Modifier.padding(20.dp),
@@ -2138,6 +2245,27 @@ fun HeaderStatusIndicator(
 ) {
     val systemStatus by viewModel.systemStatus.collectAsStateWithLifecycle()
     
+    val infiniteTransition = rememberInfiniteTransition(label = "SyncStatusIndicatorAnim")
+    val rotationAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "IconRotation"
+    )
+
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "ContainerPulse"
+    )
+
     var bgColor = Color(0xFFD1FAE5)
     var contentColor = Color(0xFF065F46)
     var statusLabel = "Up-to-Date"
@@ -2159,7 +2287,7 @@ fun HeaderStatusIndicator(
     }
 
     Surface(
-        color = bgColor,
+        color = if (systemStatus == "syncing") bgColor.copy(alpha = pulseAlpha) else bgColor,
         contentColor = contentColor,
         shape = RoundedCornerShape(16.dp),
         modifier = modifier
@@ -2175,7 +2303,13 @@ fun HeaderStatusIndicator(
             Icon(
                 imageVector = icon,
                 contentDescription = "Status: $statusLabel",
-                modifier = Modifier.size(14.dp)
+                modifier = Modifier
+                    .size(14.dp)
+                    .graphicsLayer {
+                        if (systemStatus == "syncing") {
+                            rotationZ = rotationAngle
+                        }
+                    }
             )
             Text(
                 text = statusLabel,
