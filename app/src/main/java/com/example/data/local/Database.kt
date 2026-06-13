@@ -50,6 +50,9 @@ interface DataPointDao {
     @Query("SELECT * FROM data_points WHERE seriesId = :seriesId ORDER BY year ASC, period ASC")
     fun getDataPointsForSeries(seriesId: String): Flow<List<DataPointEntity>>
 
+    @Query("SELECT * FROM data_points ORDER BY year ASC, period ASC")
+    fun getAllDataPoints(): Flow<List<DataPointEntity>>
+
     @Query("SELECT * FROM data_points WHERE seriesId = :seriesId ORDER BY year ASC, period ASC")
     suspend fun getDataPointsForSeriesList(seriesId: String): List<DataPointEntity>
 
@@ -61,6 +64,9 @@ interface DataPointDao {
 
     @Query("DELETE FROM data_points WHERE seriesId = :seriesId AND isCustom = 0")
     suspend fun clearFetchedData(seriesId: String)
+
+    @Query("DELETE FROM data_points WHERE seriesId = :seriesId")
+    suspend fun deleteDataPointsForSeries(seriesId: String)
 
     @Delete
     suspend fun deleteDataPoint(dataPoint: DataPointEntity)

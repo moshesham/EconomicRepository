@@ -43,7 +43,7 @@ import com.example.ui.viewmodel.EconomicViewModel
 import com.example.ui.viewmodel.RefreshUiState
 import kotlin.math.roundToInt
 
-enum class DashboardTab { Home, Sources, Settings }
+enum class DashboardTab { Home, Comparison, Sources, Settings }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -139,6 +139,12 @@ fun DashboardScreen(
                     label = { Text("Home", fontSize = 11.sp) }
                 )
                 NavigationBarItem(
+                    selected = currentTab == DashboardTab.Comparison,
+                    onClick = { currentTab = DashboardTab.Comparison },
+                    icon = { Icon(Icons.Default.Star, contentDescription = "Comparison") },
+                    label = { Text("Comparison", fontSize = 11.sp) }
+                )
+                NavigationBarItem(
                     selected = currentTab == DashboardTab.Sources,
                     onClick = { currentTab = DashboardTab.Sources },
                     icon = { Icon(Icons.Default.List, contentDescription = "Sources") },
@@ -162,6 +168,8 @@ fun DashboardScreen(
                 )
             } else if (currentTab == DashboardTab.Sources) {
                 DataSourcesView(viewModel = viewModel)
+            } else if (currentTab == DashboardTab.Comparison) {
+                ComparisonScreen(viewModel = viewModel)
             } else {
                 if (isWideScreen) {
                     // Canonical List-Detail Split Grid Layout for Tablets
@@ -2107,6 +2115,575 @@ fun HeaderStatusIndicator(
                 fontWeight = FontWeight.Bold
             )
         }
+    }
+}
+
+@Composable
+fun ComparisonScreen(
+    viewModel: EconomicViewModel,
+    modifier: Modifier = Modifier
+) {
+    val allSeriesList by viewModel.allSeries.collectAsStateWithLifecycle()
+    val allSeriesDataPoints by viewModel.allSeriesDataPoints.collectAsStateWithLifecycle()
+    
+    var checkedSeriesIds by remember { 
+        mutableStateOf(setOf("US_GDP", "LNS14000000", "CUSR0000SA0L1E")) 
+    }
+    
+    var isNormalizedMode by remember { mutableStateOf(true) }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primaryContainer,
+                            MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
+                        )
+                    ),
+                    shape = RoundedCornerShape(24.dp)
+                )
+                .padding(20.dp)
+        ) {
+            Text(
+                "Aggregated Macro Trends",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Text(
+                "Compare growth and intersections across all active indicators in real-time.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            DateRangeFilterSection(viewModel = viewModel)
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Chart Scale Mode",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            
+            Row(
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf(
+                    Pair(true, "Normalized (Base=100)"),
+                    Pair(false, "Raw Scale")
+                ).forEach { (mode, label) ->
+                    val isSelected = isNormalizedMode == mode
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
+                            .clickable { isNormalizedMode = mode }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            label,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        val activeDataMap = remember(allSeriesDataPoints, checkedSeriesIds) {
+            allSeriesDataPoints.filterKeys { checkedSeriesIds.contains(it) }
+        }
+
+        RechartsUnifiedComparisonChart(
+            seriesList = allSeriesList.filter { checkedSeriesIds.contains(it.id) },
+            dataMap = activeDataMap,
+            isNormalized = isNormalizedMode,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(300.dp)
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Bureau of Labor Statistics & World Bank",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "Bring down real US GDP figures and update existing macro indicators directly.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = { viewModel.refreshSelectedSeries() },
+                modifier = Modifier.testTag("sync_all_button")
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Sync Live", fontSize = 11.sp)
+            }
+        }
+
+        Text(
+            "Configure Display Series",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 140.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 240.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(allSeriesList) { series ->
+                val isChecked = checkedSeriesIds.contains(series.id)
+                val color = getSeriesColor(series.id)
+                SimpleFilterChip(
+                    selected = isChecked,
+                    onClick = {
+                        checkedSeriesIds = if (isChecked) {
+                            if (checkedSeriesIds.size > 1) checkedSeriesIds - series.id else checkedSeriesIds
+                        } else {
+                            checkedSeriesIds + series.id
+                        }
+                    },
+                    color = color,
+                    label = "${series.id} : ${series.name}"
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SimpleFilterChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    color: Color,
+    label: String
+) {
+    val containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+    val contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+    val borderColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+
+    Surface(
+        color = containerColor,
+        contentColor = contentColor,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, borderColor),
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(2.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(color, RoundedCornerShape(2.dp))
+            )
+            Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+fun RechartsUnifiedComparisonChart(
+    seriesList: List<SeriesEntity>,
+    dataMap: Map<String, List<DataPointEntity>>,
+    isNormalized: Boolean,
+    modifier: Modifier = Modifier
+) {
+    if (seriesList.isEmpty() || dataMap.isEmpty()) {
+        Box(
+            modifier = modifier
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Select at least one series below to plot.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+
+    val uniquePeriods = remember(dataMap) {
+        val keys = mutableSetOf<Int>()
+        dataMap.values.flatten().forEach { pt ->
+            val yrVal = pt.year.toIntOrNull() ?: 0
+            val moVal = when {
+                pt.period.startsWith("M") -> pt.period.substring(1).toIntOrNull() ?: 1
+                pt.period.startsWith("Q") -> (pt.period.substring(1).toIntOrNull() ?: 1) * 3
+                else -> 1
+            }
+            keys.add(yrVal * 12 + moVal)
+        }
+        keys.sorted()
+    }
+
+    if (uniquePeriods.isEmpty()) {
+        Box(
+            modifier = modifier
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("No data points available in selected filter range.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+
+    val plottedSeriesData = remember(dataMap, isNormalized, uniquePeriods) {
+        dataMap.mapValues { (seriesId, points) ->
+            if (points.isEmpty()) return@mapValues emptyList()
+            
+            val sortedPoints = points.sortedWith(compareBy<DataPointEntity> { it.year }.thenBy { it.period })
+            val baseVal = sortedPoints.firstOrNull()?.value ?: 1.0
+            val baseReference = if (baseVal == 0.0) 1.0 else baseVal
+
+            points.map { pt ->
+                val yrVal = pt.year.toIntOrNull() ?: 0
+                val moVal = when {
+                    pt.period.startsWith("M") -> pt.period.substring(1).toIntOrNull() ?: 1
+                    pt.period.startsWith("Q") -> (pt.period.substring(1).toIntOrNull() ?: 1) * 3
+                    else -> 1
+                }
+                val key = yrVal * 12 + moVal
+                val plottedVal = if (isNormalized) {
+                    (pt.value / baseReference) * 100.0
+                } else {
+                    pt.value
+                }
+                Triple(key, plottedVal, pt)
+            }
+        }
+    }
+
+    val allPlottedValues = plottedSeriesData.values.flatten().map { it.second }
+    val minVal = allPlottedValues.minOrNull() ?: 0.0
+    val maxVal = allPlottedValues.maxOrNull() ?: 100.0
+    val valRange = (maxVal - minVal).takeIf { it > 0 } ?: 1.0
+
+    val displayMin = (minVal - (valRange * 0.08)).coerceAtLeast(0.0)
+    val displayMax = maxVal + (valRange * 0.08)
+    val displayRange = displayMax - displayMin
+
+    var hoverIndex by remember(uniquePeriods) { mutableStateOf<Int?>(null) }
+    var rawTouchX by remember { mutableStateOf(-1f) }
+
+    val gridColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+                .heightIn(min = 44.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            if (hoverIndex != null && hoverIndex!! in uniquePeriods.indices) {
+                val targetKey = uniquePeriods[hoverIndex!!]
+                val yr = targetKey / 12
+                val mo = targetKey % 12
+                val periodLabel = getPeriodNameLabel(mo) + " " + yr
+                
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "📅 $periodLabel",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+                    
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        dataMap.forEach { (seriesId, list) ->
+                            val pt = list.find {
+                                val yrVal = it.year.toIntOrNull() ?: 0
+                                val moVal = when {
+                                    it.period.startsWith("M") -> it.period.substring(1).toIntOrNull() ?: 1
+                                    it.period.startsWith("Q") -> (it.period.substring(1).toIntOrNull() ?: 1) * 3
+                                    else -> 1
+                                }
+                                yrVal * 12 + moVal == targetKey
+                            }
+                            if (pt != null) {
+                                val color = getSeriesColor(seriesId)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .background(color, RoundedCornerShape(2.dp))
+                                    )
+                                    Text(
+                                        text = "${seriesList.find { it.id == seriesId }?.name ?: seriesId}: ",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = "${pt.value} ${seriesList.find { it.id == seriesId }?.unit ?: ""}",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = color
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text(
+                    "📊 Drag along the Recharts comparison canvas to inspect overlapping indicator values.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+
+        Canvas(
+            modifier = modifier
+                .fillMaxWidth()
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
+                    shape = RoundedCornerShape(24.dp)
+                )
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                    shape = RoundedCornerShape(24.dp)
+                )
+                .padding(horizontal = 16.dp, vertical = 20.dp)
+                .pointerInput(uniquePeriods) {
+                    detectTapGestures(
+                        onTap = { offset ->
+                            val ptCount = uniquePeriods.size
+                            if (ptCount > 1) {
+                                val chartWidth = size.width
+                                val stepX = chartWidth / (ptCount - 1)
+                                val idx = (offset.x / stepX).roundToInt().coerceIn(0, ptCount - 1)
+                                hoverIndex = idx
+                                rawTouchX = offset.x
+                            }
+                        }
+                    )
+                }
+                .pointerInput(uniquePeriods) {
+                    detectDragGestures(
+                        onDragEnd = { hoverIndex = null },
+                        onDragCancel = { hoverIndex = null },
+                        onDrag = { change, _ ->
+                            val ptCount = uniquePeriods.size
+                            if (ptCount > 1) {
+                                val chartWidth = size.width
+                                val stepX = chartWidth / (ptCount - 1)
+                                val cx = change.position.x
+                                val idx = (cx / stepX).roundToInt().coerceIn(0, ptCount - 1)
+                                hoverIndex = idx
+                                rawTouchX = cx
+                            }
+                        }
+                    )
+                }
+        ) {
+            val chartW = size.width
+            val chartH = size.height
+
+            if (uniquePeriods.size < 2) return@Canvas
+
+            val numGridlines = 4
+            for (i in 0..numGridlines) {
+                val gy = (chartH / numGridlines) * i
+                drawLine(
+                    color = gridColor,
+                    start = Offset(0f, gy),
+                    end = Offset(chartW, gy),
+                    strokeWidth = 1.dp.toPx()
+                )
+            }
+
+            val numVlines = uniquePeriods.size.coerceAtMost(6)
+            val vStep = uniquePeriods.size / numVlines
+            for (i in 0 until numVlines) {
+                val ptIdx = i * vStep
+                if (ptIdx in uniquePeriods.indices) {
+                    val vx = (ptIdx.toFloat() / (uniquePeriods.size - 1)) * chartW
+                    drawLine(
+                        color = gridColor,
+                        start = Offset(vx, 0f),
+                        end = Offset(vx, chartH),
+                        strokeWidth = 0.8.dp.toPx()
+                    )
+                }
+            }
+
+            val minPeriodVal = uniquePeriods.first().toFloat()
+            val maxPeriodVal = uniquePeriods.last().toFloat()
+            val periodRange = maxPeriodVal - minPeriodVal
+
+            plottedSeriesData.forEach { (seriesId, points) ->
+                if (points.size < 2) return@forEach
+                val color = getSeriesColor(seriesId)
+                val path = Path()
+                
+                val sortedPoints = points.sortedBy { it.first }
+
+                sortedPoints.forEachIndexed { i, pt ->
+                    val key = pt.first
+                    val value = pt.second
+                    
+                    val cx = if (periodRange > 0) {
+                        ((key - minPeriodVal) / periodRange) * chartW
+                    } else {
+                        0f
+                    }
+                    val cy = chartH - (((value - displayMin) / displayRange).toFloat() * chartH)
+
+                    if (i == 0) {
+                        path.moveTo(cx, cy)
+                    } else {
+                        val prevPt = sortedPoints[i - 1]
+                        val prevKey = prevPt.first
+                        val prevVal = prevPt.second
+                        val prevX = ((prevKey - minPeriodVal) / periodRange) * chartW
+                        val prevY = chartH - (((prevVal - displayMin) / displayRange).toFloat() * chartH)
+                        
+                        val controlX = (prevX + cx) / 2
+                        path.cubicTo(controlX, prevY, controlX, cy, cx, cy)
+                    }
+                }
+
+                drawPath(
+                    path = path,
+                    color = color,
+                    style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                )
+
+                if (hoverIndex != null && hoverIndex!! in uniquePeriods.indices) {
+                    val targetKey = uniquePeriods[hoverIndex!!]
+                    val hoveredPoint = sortedPoints.find { it.first == targetKey }
+                    if (hoveredPoint != null) {
+                        val cx = ((targetKey - minPeriodVal) / periodRange) * chartW
+                        val cy = chartH - (((hoveredPoint.second - displayMin) / displayRange).toFloat() * chartH)
+                        
+                        drawCircle(
+                            color = color.copy(alpha = 0.25f),
+                            radius = 6.dp.toPx(),
+                            center = Offset(cx, cy)
+                        )
+                        drawCircle(
+                            color = color,
+                            radius = 3.dp.toPx(),
+                            center = Offset(cx, cy)
+                        )
+                        drawLine(
+                            color = color.copy(alpha = 0.4f),
+                            start = Offset(cx, 0f),
+                            end = Offset(cx, chartH),
+                            strokeWidth = 0.8.dp.toPx()
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+fun getSeriesColor(seriesId: String): Color {
+    return when (seriesId) {
+        "US_GDP" -> Color(0xFF10B981)
+        "LNS14000000" -> Color(0xFFEF4444)
+        "LNS13327709" -> Color(0xFFF59E0B)
+        "LNS11300060" -> Color(0xFF3B82F6)
+        "LNS12300000" -> Color(0xFF8B5CF6)
+        "CES0000000001" -> Color(0xFFEC4899)
+        "CUSR0000SA0L1E" -> Color(0xFF06B6D4)
+        "CUUR0000SA0" -> Color(0xFF14B8A6)
+        "CUSR0000SA0H1" -> Color(0xFFF97316)
+        "WPUFD49207" -> Color(0xFF6B7280)
+        "CES0500000003" -> Color(0xFF22C55E)
+        "CES0500000007" -> Color(0xFFFFD700)
+        "CIS2010000000000I" -> Color(0xFF6366F1)
+        "PRS85006093" -> Color(0xFFD946EF)
+        "JTS000000000000000JOL" -> Color(0xFF78350F)
+        "JTS000000000000000QUR" -> Color(0xFF0369A1)
+        else -> Color(0xFF94A3B8)
+    }
+}
+
+fun getPeriodNameLabel(month: Int): String {
+    return when (month) {
+        1 -> "Jan"
+        2 -> "Feb"
+        3 -> "Mar"
+        4 -> "Apr"
+        5 -> "May"
+        6 -> "Jun"
+        7 -> "Jul"
+        8 -> "Aug"
+        9 -> "Sep"
+        10 -> "Oct"
+        11 -> "Nov"
+        12 -> "Dec"
+        0 -> "Dec"
+        else -> "P$month"
     }
 }
 

@@ -68,6 +68,9 @@ class EconomicRepository(private val db: AppDatabase) {
     fun getDataPointsForSeries(seriesId: String): Flow<List<DataPointEntity>> =
         dataPointDao.getDataPointsForSeries(seriesId)
 
+    fun getAllDataPoints(): Flow<List<DataPointEntity>> =
+        dataPointDao.getAllDataPoints()
+
     fun observeSetting(key: String): Flow<SettingsEntity?> =
         settingsDao.observeSetting(key)
 
@@ -251,6 +254,14 @@ class EconomicRepository(private val db: AppDatabase) {
     // and caches them in Room.
     suspend fun refreshBLSData(seriesId: String, startYear: String = "2024", endYear: String = "2026"): Result<Unit> =
         withContext(Dispatchers.IO) {
+            if (seriesId == "US_GDP") {
+                val success = fetchUsGdpData()
+                return@withContext if (success) {
+                    Result.success(Unit)
+                } else {
+                    Result.failure(Exception("Failed to fetch historical US GDP data from World Bank API."))
+                }
+            }
             try {
                 // Read optional custom API key from settings, else use null for public tier
                 val customApiKey = getSetting("bls_api_key").takeIf { !it.isNullOrBlank() }
@@ -464,9 +475,105 @@ class EconomicRepository(private val db: AppDatabase) {
 
     // Populates standard economic metadata and authentic initial data points
     // so the application begins with rich, useful context.
+    suspend fun fetchUsGdpData(): Boolean = withContext(Dispatchers.IO) {
+        val url = "https://api.worldbank.org/v2/country/US/indicator/NY.GDP.MKTP.CD?format=json&per_page=100"
+        val request = okhttp3.Request.Builder().url(url).build()
+        try {
+            val response = okHttpClient.newCall(request).execute()
+            if (!response.isSuccessful) {
+                logSync("World Bank (GDP)", "Failed", "HTTP ${response.code}", "Failed to fetch US GDP historical data")
+                return@withContext false
+            }
+            val bodyString = response.body?.string() ?: return@withContext false
+            
+            val jsonArray = org.json.JSONArray(bodyString)
+            if (jsonArray.length() < 2) return@withContext false
+            val dataArray = jsonArray.getJSONArray(1)
+            
+            val gdpPoints = mutableListOf<DataPointEntity>()
+            // Ensure Series exists
+            val gdpSeriesExists = db.seriesDao().getAllSeries().first().any { it.id == "US_GDP" }
+            if (!gdpSeriesExists) {
+                db.seriesDao().insertSeries(listOf(
+                    SeriesEntity(
+                        id = "US_GDP",
+                        name = "US Gross Domestic Product (GDP)",
+                        category = "Wages & Productivity",
+                        description = "Gross Domestic Product (GDP) is the standard measure of the value-added created through the production of goods and services in the United States.",
+                        significance = "The ultimate indicator of broad aggregate economic output, used to track business cycles and monetary policy impacts.",
+                        unit = "$ Trillions"
+                    )
+                ))
+            }
+
+            for (i in 0 until dataArray.length()) {
+                val item = dataArray.getJSONObject(i)
+                val yearStr = item.optString("date", "")
+                val valueObj = item.opt("value")
+                if (yearStr.isNotBlank() && valueObj != null && valueObj != org.json.JSONObject.NULL) {
+                    val rawValue = item.optDouble("value")
+                    // Convert to Trillion USD (e.g. 27,360,000,000,000 becomes 27.36)
+                    val valueInTrillions = rawValue / 1_000_000_000_000.0
+                    val roundedValue = Math.round(valueInTrillions * 1000.0) / 1000.0
+                    
+                    gdpPoints.add(
+                        DataPointEntity(
+                            seriesId = "US_GDP",
+                            year = yearStr,
+                            period = "M01",
+                            periodName = "January",
+                            value = roundedValue,
+                            isCustom = false
+                        )
+                    )
+                }
+            }
+
+            if (gdpPoints.isNotEmpty()) {
+                db.dataPointDao().deleteDataPointsForSeries("US_GDP")
+                db.dataPointDao().insertDataPoints(gdpPoints)
+                logSync("World Bank (GDP)", "Success", "Fetched ${gdpPoints.size} GDP points", "Successfully synced historical US GDP from World Bank API.")
+                return@withContext true
+            }
+            return@withContext false
+        } catch (e: Exception) {
+            logSync("World Bank (GDP)", "Failed", e.localizedMessage ?: "Unknown error", e.stackTraceToString())
+            return@withContext false
+        }
+    }
+
     suspend fun seedInitialData() {
         val existingSeries = db.seriesDao().getAllSeries().first()
         val existingIds = existingSeries.map { it.id }.toSet()
+
+        if (!existingIds.contains("US_GDP")) {
+            val gdpSeries = SeriesEntity(
+                id = "US_GDP",
+                name = "US Gross Domestic Product (GDP)",
+                category = "Wages & Productivity",
+                description = "Gross Domestic Product (GDP) is the standard measure of the value-added created through the production of goods and services in the United States.",
+                significance = "The ultimate indicator of broad aggregate economic output, used to track business cycles and monetary policy impacts.",
+                unit = "$ Trillions"
+            )
+            db.seriesDao().insertSeries(listOf(gdpSeries))
+            
+            val gdpPoints = listOf(
+                DataPointEntity("US_GDP", "2015", "M01", "January", 18.21),
+                DataPointEntity("US_GDP", "2016", "M01", "January", 18.71),
+                DataPointEntity("US_GDP", "2017", "M01", "January", 19.48),
+                DataPointEntity("US_GDP", "2018", "M01", "January", 20.53),
+                DataPointEntity("US_GDP", "2019", "M01", "January", 21.38),
+                DataPointEntity("US_GDP", "2020", "M01", "January", 21.06),
+                DataPointEntity("US_GDP", "2021", "M01", "January", 23.32),
+                DataPointEntity("US_GDP", "2022", "M01", "January", 25.46),
+                DataPointEntity("US_GDP", "2023", "M01", "January", 27.36),
+                DataPointEntity("US_GDP", "2024", "M01", "January", 28.78),
+                DataPointEntity("US_GDP", "2025", "M01", "January", 29.82),
+                DataPointEntity("US_GDP", "2026", "M01", "January", 30.90)
+            )
+            db.dataPointDao().insertDataPoints(gdpPoints)
+        }
+
         if (existingIds.contains("CUSR0000SA0H1")) return // Already seeded with updated series
 
         val defaultSeries = listOf(

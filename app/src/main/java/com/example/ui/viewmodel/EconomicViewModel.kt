@@ -105,6 +105,31 @@ class EconomicViewModel(private val repository: EconomicRepository) : ViewModel(
         initialValue = emptyList()
     )
 
+    // Flow of all data points across all series, filtered dynamically by date range
+    val allSeriesDataPoints: StateFlow<Map<String, List<DataPointEntity>>> = combine(
+        repository.getAllDataPoints(),
+        _startYear,
+        _startMonth,
+        _endYear,
+        _endMonth
+    ) { points, sY, sM, eY, eM ->
+        points.filter { pt ->
+            val monthNum = when {
+                pt.period.startsWith("M") -> pt.period.substring(1).toIntOrNull() ?: 1
+                pt.period.startsWith("Q") -> (pt.period.substring(1).toIntOrNull() ?: 1) * 3
+                else -> 1
+            }
+            val pointValue = pt.year.toIntOrNull()?.let { y -> y * 12 + monthNum } ?: 0
+            val startValue = sY * 12 + sM
+            val endValue = eY * 12 + eM
+            pointValue in startValue..endValue
+        }.groupBy { it.seriesId }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyMap()
+    )
+
     // Economic Climate Summary State
     private val _climateSummaryState = MutableStateFlow<ClimateSummaryUiState>(ClimateSummaryUiState.Idle)
     val climateSummaryState: StateFlow<ClimateSummaryUiState> = _climateSummaryState.asStateFlow()
